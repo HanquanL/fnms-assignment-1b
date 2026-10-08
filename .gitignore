@@ -20,3 +20,8 @@ Thumbs.db
 # Leading slash = only the repo-root .env. backend/.env and frontend/.env
 # stay committed on purpose (throwaway DB connection string / public API URL).
 /.env
+
+
+# Tracker development runs (the graded run1/run2 reports and traces ARE committed)
+reports/dev/
+traces/dev/

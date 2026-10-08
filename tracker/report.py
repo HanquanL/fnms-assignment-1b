@@ -141,3 +141,26 @@ def validate_report(raw: Any, k: int, fetched_texts: Mapping[str, str] | None = 
         return FinishResult(False, problems=problems)
     clean_devs.sort(key=lambda d: d["rank"])
     return FinishResult(True, report={"developments": clean_devs, "notes": str(raw.get("notes") or "")[:2000]})
+
+def salvage_report(raw: Any, k: int, fetched_texts: Mapping[str, str]) -> dict:
+    """Last resort after repeated rejections: keep each development's sources that
+    verify on their own, drop the rest, and renumber ranks. Nothing unverified survives."""
+    kept: list[tuple[int, dict]] = []
+    seen: set[str] = set()
+    devs = raw.get("developments") if isinstance(raw, dict) else None
+    for d in (devs if isinstance(devs, list) else [])[:k]:
+        if not isinstance(d, dict) or not isinstance(d.get("sources"), list):
+            continue
+        good = [s for s in d["sources"][:5]
+                if validate_report({"developments": [{**d, "rank": 1, "sources": [s]}]}, k, fetched_texts).ok]
+        if not good:
+            continue
+        res = validate_report({"developments": [{**d, "rank": 1, "sources": good}]}, k, fetched_texts)
+        if res.ok and res.report["developments"][0]["key"] not in seen:
+            dev = res.report["developments"][0]
+            seen.add(dev["key"])
+            rank = d.get("rank") if isinstance(d.get("rank"), int) else 99
+            kept.append((rank, dev))
+    kept.sort(key=lambda x: x[0])
+    developments = [{**dev, "rank": i} for i, (_, dev) in enumerate(kept, start=1)]
+    return {"developments": developments, "notes": "Salvaged: only developments with verified evidence were kept."}

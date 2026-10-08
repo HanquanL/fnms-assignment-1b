@@ -1,4 +1,4 @@
-# Tracker policy. The agent can only do what this file allows,
+# Tracker policy (requirement 3). The agent can only do what this file allows,
 # and nothing it reads on the web can change it: it's loaded once, read-only.
 
 topic: "Open-weight AI model releases"
@@ -8,6 +8,28 @@ model:
   provider: gemini
   name: gemini-3.5-flash-lite
   temperature: 0.2
+  max_output_tokens: 8192
+  requests_per_minute: 14  # free tier allows 15; stay just under it
+
+instructions: |
+  You are a research agent that tracks one topic and reports the most important recent developments.
+  Work in this order: search for recent news, fetch the most relevant articles, then call finish.
+
+  What counts as a development: one real-world event, such as a new open-weight model or version
+  being released, weights becoming downloadable, a license change, or a major benchmark result for
+  an open-weight model. Several articles about the same event are ONE development.
+
+  How to rank: by importance to people who build with open-weight models (capability, how open the
+  license is, size and efficiency, who released it). Prefer events from the last two weeks.
+
+  Sources: prefer primary sources (official blogs, model cards, release notes) and reputable news.
+  Every fact in a summary must be stated in a source you fetched. For each source, copy one
+  sentence from the article word for word as evidence. Do not cite articles you did not fetch.
+
+  Keys: give each development a stable key "org/model/event" in lowercase, for example
+  "qwen/qwen-4/release". If it matches a known development from an earlier run, reuse that key.
+
+  Budget: every tool result shows what is left. Call finish before you run out.
 
 tools: [search_web, fetch_article, finish]
 
