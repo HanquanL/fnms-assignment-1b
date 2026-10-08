@@ -75,6 +75,7 @@ class AgentResult:
     stats: dict
     started_at: str
     finished_at: str
+    model: str = ""            # the model that served the last call (main or fallback)
 
 
 SearchFn = Callable[..., SearchResponse]
@@ -388,4 +389,5 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
     trace.log("run", status=status, detail=stop_reason, usage=budget.stats(),
               developments=len(report["developments"]))
     return AgentResult(status=status, stop_reason=stop_reason, report=report, articles=list(articles.values()),
-                       stats=budget.stats(), started_at=started_at, finished_at=finished_at)
+                       stats=budget.stats(), started_at=started_at, finished_at=finished_at,
+                       model=active["llm"].model)
