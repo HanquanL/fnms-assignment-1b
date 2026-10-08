@@ -1,4 +1,4 @@
-"""The agent loop, written by hand : search -> fetch -> observe ->
+"""The agent loop, written by hand (requirement 1): search -> fetch -> observe ->
 decide -> synthesize, with the runtime -- not the model -- in charge of:
 
   budgets      every model call, search, and fetch is counted; when a run limit
@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Callable, Mapping
 
 from tracker.budget import Budget, BudgetExceeded
-from tracker.errors import RetryPolicy, TerminalError, ToolInputError, call_with_retry
+from tracker.errors import RetriesExhausted, RetryPolicy, TerminalError, ToolInputError, call_with_retry
 from tracker.fetch import FetchResult
 from tracker.llm.base import LLMClient, ModelTurn, Pacer, ToolCall, ToolResult, ToolResults, ToolSpec, UserText
 from tracker.report import REPORT_SCHEMA, salvage_report, validate_report
@@ -119,6 +119,7 @@ def kickoff(cfg: Mapping, memory: Memory, budget: Budget) -> str:
 
 def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, trace: Trace, *,
               memory: Memory | None = None, pacer: Pacer | None = None, retry: RetryPolicy | None = None,
+              fallback_llm: LLMClient | None = None,
               sleep: Callable[[float], None] = time.sleep) -> AgentResult:
     memory = memory or Memory()
     k = int(cfg["k"])
@@ -230,7 +231,12 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
                                  f"developments whose evidence verified")
                 trace.log("tool", step=budget.steps, tool="finish", status="salvaged", detail=salvaged_note)
                 return {"accepted": True, "note": salvaged_note}, salvaged
+        cited_ok = sorted({a["url"] for a in articles.values() if a["status"] == "fetched"})
         return {"accepted": False, "problems": res.problems[:12],
+                "you_may_cite_only_these_fetched_urls": cited_ok + [d["sources"][0]["url"] for d in memory.developments
+                                                                     if d.get("sources")][:40],
+                "how_to_fix": "Fetch an article before citing it, or drop the development. Copy evidence "
+                              "sentences exactly from the fetched text.",
                 "attempts_left": max(0, MAX_FINISH_ATTEMPTS - finish_attempts)}, None
 
     def dispatch(call: ToolCall, allowed: set[str]) -> tuple[dict, dict | None]:
@@ -244,22 +250,37 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
 
     # ---------- model ----------
 
+    active = {"llm": llm, "fallback": fallback_llm}
+
     def model_call(tools: list[ToolSpec]) -> ModelTurn:
         t0 = time.monotonic()
 
         def attempt() -> ModelTurn:
             pacer.wait()  # stay under requests_per_minute instead of collecting 429s
-            return llm.generate(system, history, tools)
+            return active["llm"].generate(system, history, tools)
+
+        def with_retries() -> ModelTurn:
+            return call_with_retry(attempt, retry, what=f"{active['llm'].provider} model call",
+                                   on_retry=on_retry("model"), sleep=sleep)
 
         try:
-            turn = call_with_retry(attempt, retry, what=f"{llm.provider} model call", on_retry=on_retry("model"),
-                                   sleep=sleep)
+            try:
+                turn = with_retries()
+            except RetriesExhausted as e:
+                # The model stayed unavailable (e.g. 503 "high demand") through every retry.
+                # Switch once to the fallback model instead of ending the run.
+                if active["fallback"] is None:
+                    raise
+                old, active["llm"], active["fallback"] = active["llm"].model, active["fallback"], None
+                trace.log("model", step=budget.steps + 1, model=old, status="fallback",
+                          detail=f"switching to {active['llm'].model} after: {e}")
+                turn = with_retries()
         except TerminalError as e:
-            trace.log("model", step=budget.steps + 1, model=llm.model, status="error",
+            trace.log("model", step=budget.steps + 1, model=active["llm"].model, status="error",
                       latency_ms=int((time.monotonic() - t0) * 1000), error=f"{type(e).__name__}: {e}")
             raise
         budget.add_model_call(turn.usage)
-        trace.log("model", step=budget.steps, model=llm.model, status="ok",
+        trace.log("model", step=budget.steps, model=active["llm"].model, status="ok",
                   latency_ms=int((time.monotonic() - t0) * 1000), tokens=asdict(turn.usage),
                   tool_calls=[{"tool": c.name, "args": c.args} for c in turn.tool_calls] or None,
                   finish_reason=turn.finish_reason, text=turn.text or None)

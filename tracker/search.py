@@ -104,7 +104,7 @@ def tavily_search(query: str, *, api_key: str, cfg: Mapping, timeout: float = 20
         SearchHit(
             title=clean(str(r.get("title") or ""))[:300],
             url=str(r.get("url") or "")[:2048],
-            snippet=clean(str(r.get("content") or ""))[:1000],
+            snippet=clean(str(r.get("content") or ""))[:500],
             published_date=r.get("published_date"),
             score=r.get("score"),
         )

@@ -10,6 +10,7 @@ model:
   temperature: 0.2
   max_output_tokens: 8192
   requests_per_minute: 14  # free tier allows 15; stay just under it
+  fallback_name: gemini-3.1-flash-lite  # used if the main model stays overloaded (503) after all retries
 
 instructions: |
   You are a research agent that tracks one topic and reports the most important recent developments.
@@ -23,8 +24,11 @@ instructions: |
   license is, size and efficiency, who released it). Prefer events from the last two weeks.
 
   Sources: prefer primary sources (official blogs, model cards, release notes) and reputable news.
+  Fetch before you cite: a search result is only a lead, not evidence. Fetch at least one article
+  for every development you report, and cite only URLs that fetch_article returned as fetched.
   Every fact in a summary must be stated in a source you fetched. For each source, copy one
-  sentence from the article word for word as evidence. Do not cite articles you did not fetch.
+  sentence from the article word for word as evidence. If a development has no fetched source,
+  leave it out: a shorter verified list beats a full unverified one.
 
   Keys: give each development a stable key "org/model/event" in lowercase, for example
   "qwen/qwen-4/release". If it matches a known development from an earlier run, reuse that key.
@@ -37,7 +41,7 @@ limits:
   max_steps: 25            # model calls per run
   max_searches: 8          # search_web calls (1 Tavily credit each)
   max_fetches: 15          # fetch_article calls
-  max_total_tokens: 300000 # prompt + output + thinking, summed over the run
+  max_total_tokens: 500000 # prompt + output + thinking, summed over the run
   max_wall_seconds: 600
 
 fetch:
@@ -49,16 +53,16 @@ fetch:
   total_timeout_seconds: 20
   max_bytes: 2000000       # stop downloading after 2 MB
   max_redirects: 5
-  max_chars_to_model: 12000
+  max_chars_to_model: 8000
 
 search:
   provider: tavily
-  max_results: 8
+  max_results: 6
   search_depth: basic      # 1 credit per search ("advanced" costs 2)
   topic: news
   time_range: week         # only results from the last 7 days
 
 retry:                     # transient failures only (timeouts, 5xx, per-minute 429)
-  max_attempts: 4
-  base_delay_seconds: 1    # 1s, 2s, 4s (+ jitter) between attempts
+  max_attempts: 6
+  base_delay_seconds: 1    # 1s, 2s, 4s, 8s, 16s (+ jitter) between attempts
   max_delay_seconds: 60    # a server asking us to wait longer than this = treat as quota

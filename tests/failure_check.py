@@ -5,7 +5,7 @@ so this runs in about a second and uses no credits. One case calls the real
 Tavily API with a bogus key (free: rejected before any search runs).
 
 Usage (from the repo root, tracker venv):
-    .venv\\Scripts\\python.exe tests\\failure_check.py
+    .venv\Scripts\python.exe tests\failure_check.py
 """
 import sys
 from pathlib import Path
@@ -68,7 +68,8 @@ check("429 with Retry-After: 7 -> waits >= 7s, then succeeds", r is not None and
 r, e, n, s = run(httpx.ConnectError("network is unreachable"))
 check(f"network down -> {POLICY.max_attempts} attempts, then RetriesExhausted",
       isinstance(e, RetriesExhausted) and n == POLICY.max_attempts and len(s) == POLICY.max_attempts - 1, f"{e!r} n={n}")
-check("backoff grows (1s, 2s, 4s + jitter)", len(s) == 3 and s[0] < s[1] < s[2], f"sleeps={s}")
+check("backoff grows (1s, 2s, 4s, ... + jitter)",
+      len(s) == POLICY.max_attempts - 1 and all(a < b for a, b in zip(s, s[1:])), f"sleeps={s}")
 r, e, n, s = run(httpx.ReadTimeout("timed out"))
 check("timeout -> retried, then RetriesExhausted", isinstance(e, RetriesExhausted) and n == POLICY.max_attempts, repr(e))
 r, e, n, s = run((429, {"detail": "slow down"}, None))
@@ -135,6 +136,11 @@ res = validate_report(report(sources=[{"url": "https://example.com/q4",
                                        "evidence": "alibaba  released Qwen 4 today under the Apache 2.0 license"}]),
                       CFG["k"], fetched)
 check("quote matching ignores case/whitespace/trailing period", res.ok, str(res.problems))
+no_title = report()
+del no_title["developments"][0]["title"]
+res = validate_report(no_title, CFG["k"], fetched)
+check("missing title -> derived from the summary's first sentence", res.ok and
+      res.report["developments"][0]["title"] == "Alibaba released Qwen 4.", str(res.problems or res.report))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)

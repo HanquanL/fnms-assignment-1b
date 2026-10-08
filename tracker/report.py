@@ -45,6 +45,7 @@ REPORT_SCHEMA = {
                     },
                 },
                 "required": ["key", "title", "summary", "rank", "sources"],
+                "propertyOrdering": ["key", "title", "summary", "rank", "sources"],
             },
         },
         "notes": {"type": "string", "description": "Optional: gaps, caveats."},
@@ -90,8 +91,11 @@ def validate_report(raw: Any, k: int, fetched_texts: Mapping[str, str] | None = 
             problems.append(f"{where}: must be an object")
             continue
         key = str(d.get("key", "")).strip().lower()
-        title = " ".join(str(d.get("title", "")).split())
         summary = " ".join(str(d.get("summary", "")).split())
+        title = " ".join(str(d.get("title") or "").split())
+        if not title and summary:  # models sometimes drop the title; derive it, never invent facts
+            first = re.split(r"(?<=[.!?])\s", summary, maxsplit=1)[0]
+            title = first if len(first) <= 120 else first[:117].rstrip() + "..."
         rank = d.get("rank")
         if not KEY_RE.match(key) or len(key) > 200:
             problems.append(f"{where}: key '{key}' must look like 'org/model/event' (lowercase, a-z 0-9 . _ -)")
@@ -141,6 +145,7 @@ def validate_report(raw: Any, k: int, fetched_texts: Mapping[str, str] | None = 
         return FinishResult(False, problems=problems)
     clean_devs.sort(key=lambda d: d["rank"])
     return FinishResult(True, report={"developments": clean_devs, "notes": str(raw.get("notes") or "")[:2000]})
+
 
 def salvage_report(raw: Any, k: int, fetched_texts: Mapping[str, str]) -> dict:
     """Last resort after repeated rejections: keep each development's sources that

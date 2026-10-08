@@ -20,12 +20,15 @@ from tracker.tools import fetch_article, search_web
 from tracker.trace import Trace
 
 
-def make_llm(cfg):
+def make_llms(cfg):
+    """(main model, fallback model or None), both from config.yaml."""
     m = cfg["model"]
     if m["provider"] != "gemini":
         raise TerminalError(f"model.provider '{m['provider']}' is not supported (only 'gemini')")
-    return GeminiClient(m["name"], secret("GEMINI_API_KEY"), temperature=float(m["temperature"]),
-                        max_output_tokens=int(m["max_output_tokens"]))
+    key = secret("GEMINI_API_KEY")
+    opts = {"temperature": float(m["temperature"]), "max_output_tokens": int(m["max_output_tokens"])}
+    fallback = GeminiClient(m["fallback_name"], key, **opts) if m.get("fallback_name") else None
+    return GeminiClient(m["name"], key, **opts), fallback
 
 
 def cmd_run_local() -> int:
@@ -34,7 +37,7 @@ def cmd_run_local() -> int:
     trace_path = ROOT / "traces" / "dev" / f"{stamp}.jsonl"
     report_path = ROOT / "reports" / "dev" / f"{stamp}.md"
     try:
-        llm = make_llm(cfg)
+        llm, fallback = make_llms(cfg)
         secret("TAVILY_API_KEY")  # fail fast, before the first model call
     except TerminalError as e:
         print(f"STOPPED: {e}", file=sys.stderr)
@@ -42,7 +45,7 @@ def cmd_run_local() -> int:
 
     trace = Trace(trace_path)
     try:
-        result = run_agent(cfg, llm, search_web, fetch_article, trace)
+        result = run_agent(cfg, llm, search_web, fetch_article, trace, fallback_llm=fallback)
     finally:
         trace.close()
     report_path.parent.mkdir(parents=True, exist_ok=True)
