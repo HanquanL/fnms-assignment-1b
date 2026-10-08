@@ -28,11 +28,13 @@ from tracker.urls import canonicalize  # noqa: E402
 CFG = load_config()
 URL = "https://example.com/qwen-4"
 TEXT = "Alibaba released Qwen 4 today under the Apache 2.0 license. The 72B model is on Hugging Face."
+EVIDENCE = "Alibaba released Qwen 4 today under the Apache 2.0 license."
 GOOD = {"developments": [{"key": "qwen/qwen-4/release", "title": "Qwen 4 released", "rank": 1,
-                          "summary": "Alibaba released Qwen 4 under Apache 2.0.",
-                          "sources": [{"url": URL, "evidence": "Alibaba released Qwen 4 today under the Apache 2.0 license."}]}]}
+                          "claims": [{"text": "Alibaba released Qwen 4 under Apache 2.0.", "url": URL,
+                                      "evidence": EVIDENCE}]}]}
 BAD = {"developments": [{**GOOD["developments"][0],
-                         "sources": [{"url": URL, "evidence": "Qwen 4 beats every closed model on every benchmark."}]}]}
+                         "claims": [{"text": "Qwen 4 beats every closed model.", "url": URL,
+                                     "evidence": "Qwen 4 beats every closed model on every benchmark."}]}]}
 passed = failed = 0
 
 
@@ -65,6 +67,7 @@ class FakeLLM:
 class FakeTools:
     def __init__(self, page_text=TEXT):
         self.searches, self.fetched, self.page_text = 0, [], page_text
+        self.blocked_host = "paywalled.example"
 
     def search(self, query, on_retry=None):
         self.searches += 1
@@ -72,6 +75,8 @@ class FakeTools:
 
     def fetch(self, url):
         self.fetched.append(url)
+        if self.blocked_host in url:
+            return FetchResult("failed", url, canonicalize(url), url, None, "", 403, "HTTP 403")
         return FetchResult("fetched", url, canonicalize(url), url, "Qwen 4", self.page_text, 200)
 
 
@@ -99,12 +104,14 @@ res, tools, llm, ev = run(scripted(turn(("search_web", {"query": "qwen 4"})),
                                    turn(("finish", GOOD))))
 check("status complete with 1 verified development", res.status == "complete" and len(res.report["developments"]) == 1,
       f"{res.status} {res.stop_reason}")
-check("3 model calls, 1 search, 1 fetch counted", res.stats["steps"] == 3 and res.stats["searches"] == 1
-      and res.stats["fetches"] == 1, str(res.stats))
-check("tokens summed from usage", res.stats["tokens_total"] == 360, str(res.stats))
+check("4 model calls (finish twice: short list -> asked for more), 1 search, 1 fetch",
+      res.stats["steps"] == 4 and res.stats["searches"] == 1 and res.stats["fetches"] == 1, str(res.stats))
+check("tokens summed from usage", res.stats["tokens_total"] == 480, str(res.stats))
+check("1 of 5 verified -> provisional once, then accepted",
+      [e["status"] for e in ev if e.get("tool") == "finish"] == ["provisional", "accepted"])
 check("article recorded as fetched", [a["status"] for a in res.articles] == ["fetched"], str(res.articles))
 kinds = [e["kind"] for e in ev]
-check("trace: run start, 3 model + 3 tool events, run end", kinds.count("model") == 3 and kinds.count("tool") == 3
+check("trace: run start, 4 model + 4 tool events, run end", kinds.count("model") == 4 and kinds.count("tool") == 4
       and kinds[0] == "run" and kinds[-1] == "run", str(kinds))
 check("trace model events carry step, latency, tokens",
       all({"step", "latency_ms", "tokens"} <= e.keys() for e in ev if e["kind"] == "model"))
@@ -113,7 +120,8 @@ print("\n== Hallucinated evidence is rejected, the model fixes it")
 res, tools, llm, ev = run(scripted(turn(("search_web", {"query": "q"})), turn(("fetch_article", {"url": URL})),
                                    turn(("finish", BAD)), turn(("finish", GOOD))))
 fin = [e["status"] for e in ev if e.get("tool") == "finish"]
-check("finish: rejected, then accepted", fin == ["rejected", "accepted"] and res.status == "complete", str(fin))
+check("finish: rejected, then accepted", fin == ["rejected", "provisional", "accepted"] and res.status == "complete",
+      str(fin))
 
 print("\n== Budget: a model that never stops is stopped by the runtime")
 always_search = lambda n, tools, h: (turn(("finish", {"developments": []})) if [t.name for t in tools] == ["finish"]  # noqa: E731
@@ -174,9 +182,10 @@ def cite_unfetched(n, tools, history):
     if n == 4:
         payloads.append(history[-1].results[0].content)
     unfetched = {"developments": [{**GOOD["developments"][0],
-                                   "sources": [{"url": "https://not-fetched.example/x", "evidence": "x" * 40}]}]}
+                                   "claims": [{"text": "Qwen 4 is out now.", "url": "https://not-fetched.example/x",
+                                               "evidence": "x" * 40}]}]}
     return [turn(("search_web", {"query": "q"})), turn(("fetch_article", {"url": URL})), turn(("finish", unfetched)),
-            turn(("finish", GOOD))][n - 1]
+            turn(("finish", GOOD))][min(n, 4) - 1]
 
 
 res, tools, llm, ev = run(cite_unfetched)
@@ -194,7 +203,8 @@ seen_results = []
 def injected(n, tools, history):
     if n == 3:
         seen_results.append(history[-1].results[0].content)
-    return [turn(("search_web", {"query": "q"})), turn(("fetch_article", {"url": URL})), turn(("finish", GOOD))][n - 1]
+    return [turn(("search_web", {"query": "q"})), turn(("fetch_article", {"url": URL})),
+            turn(("finish", GOOD))][min(n, 3) - 1]
 
 
 res, tools, llm, ev = run(injected, page_text=INJECT)
@@ -204,12 +214,12 @@ check("page text reaches the model fenced as untrusted", text.startswith("<untru
 check("the page can't close the fence early", text.count("</untrusted_web_content>") == 1, text[-200:])
 check("trace flags possible injection", any(e.get("possible_injection") for e in ev))
 check("budget and config unchanged (max_steps still from config.yaml)",
-      CFG["limits"]["max_steps"] == 25 and res.stats["steps"] == 3, str(res.stats))
+      CFG["limits"]["max_steps"] == 25 and res.stats["steps"] == 4, str(res.stats))
 
 print("\n== Memory: skip seen URLs, cite known evidence")
 mem = Memory(seen_urls={canonicalize(URL)},
              developments=[{"key": "qwen/qwen-4/release", "title": "Qwen 4 released", "summary": "s",
-                            "sources": [{"url": URL, "evidence": GOOD["developments"][0]["sources"][0]["evidence"]}]}],
+                            "sources": [{"url": URL, "evidence": EVIDENCE}]}],
              last_top_k=[{"rank": 1, "key": "qwen/qwen-4/release", "title": "Qwen 4 released", "summary": "s"}])
 res, tools, llm, ev = run(scripted(turn(("search_web", {"query": "q"})), turn(("fetch_article", {"url": URL})),
                                    turn(("finish", GOOD))), memory=mem)
@@ -217,6 +227,42 @@ check("seen URL is skipped without a request", tools.fetched == [] and [a["statu
       f"fetched={tools.fetched} {res.articles}")
 check("skipped fetch doesn't use the fetch budget", res.stats["fetches"] == 0, str(res.stats))
 check("finish citing the known source + evidence is accepted", res.status == "complete", f"{res.status} {res.stop_reason}")
+
+print("\n== A site that refuses us once isn't tried again this run")
+hints = []
+
+
+def paywalled(n, tools, history):
+    if n in (2, 3):
+        hints.append(history[-1].results[0].content)
+    return [turn(("fetch_article", {"url": "https://paywalled.example/a"})),
+            turn(("fetch_article", {"url": "https://paywalled.example/b"})),
+            turn(("fetch_article", {"url": URL})), turn(("finish", GOOD))][min(n, 4) - 1]
+
+
+res, tools, llm, ev = run(paywalled)
+check("second URL on the refusing host: no request, no fetch budget",
+      tools.fetched == ["https://paywalled.example/a", URL] and res.stats["fetches"] == 2,
+      f"fetched={tools.fetched} {res.stats}")
+check("the model is told to look for the primary source",
+      len(hints) == 2 and all("primary source" in h.get("hint", "") for h in hints), str(hints)[:200])
+check("both attempts still listed as articles (failed, with reasons)",
+      [a["status"] for a in res.articles][:2] == ["failed", "failed"], str(res.articles))
+
+print("\n== Budget runs out after a provisional report -> that verified report is kept")
+
+
+def short_then_wander(n, tools, history):
+    if [t.name for t in tools] == ["finish"]:
+        return turn(("finish", {"developments": []}))
+    if n <= 2:
+        return [turn(("fetch_article", {"url": URL})), turn(("finish", GOOD))][n - 1]
+    return turn(("search_web", {"query": f"more {n}"}))
+
+
+res, tools, llm, ev = run(short_then_wander)
+check("status partial (budget), but the provisional verified development is in the report",
+      res.status == "partial" and len(res.report["developments"]) == 1, f"{res.status} {res.report['developments']}")
 
 print("\n== Text-only reply gets a nudge, not a crash")
 res, tools, llm, ev = run(scripted(turn(text="I will search now."), turn(("search_web", {"query": "q"})),

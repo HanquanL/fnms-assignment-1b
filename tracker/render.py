@@ -20,9 +20,13 @@ def _url(url: str) -> str:
 
 
 def _dev_block(d: dict) -> list[str]:
-    lines = [f"### {d['rank']}. {_md(d['title'])}", f"`{d['key']}`", "", _md(d["summary"]), "", "Sources:"]
-    for s in d["sources"]:
-        lines.append(f"- <{_url(s['url'])}>  \n  > {_md(s['evidence'])}")
+    lines = [f"### {d['rank']}. {_md(d['title'])}", f"`{d['key']}`", "", _md(d["summary"]), "", "Evidence:"]
+    if d.get("claims"):
+        for c in d["claims"]:
+            lines.append(f"- {_md(c['text'])}  \n  Source: <{_url(c['url'])}>  \n  > {_md(c['evidence'])}")
+    else:
+        for s in d["sources"]:
+            lines.append(f"- <{_url(s['url'])}>  \n  > {_md(s['evidence'])}")
     lines.append("")
     return lines
 

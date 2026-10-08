@@ -28,8 +28,13 @@ from tracker.report import REPORT_SCHEMA, salvage_report, validate_report
 from tracker.search import SearchResponse
 from tracker.trace import Trace
 from tracker.urls import canonicalize
+from urllib.parse import urlsplit
 
 MAX_FINISH_ATTEMPTS = 3
+BLOCKING_STATUSES = (401, 402, 403, 429, 451)  # the site refuses automated fetching (paywall, bot wall, rate limit)
+PRIMARY_SOURCE_HINT = ("This site refuses automated fetching. Don't retry it: look for the primary source "
+                       "instead (the company's own blog or news page, the model card on huggingface.co, "
+                       "or the GitHub release), or another outlet.")
 INJECTION_HINTS = ("ignore previous", "ignore all previous", "ignore the above", "disregard", "you are now",
                    "new instructions", "system prompt", "max_steps", "api key")
 
@@ -137,6 +142,9 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
                    for d in memory.developments for s in d.get("sources", []) if s.get("url")}
     finish_attempts = 0
     salvaged_note: str | None = None
+    blocked_hosts: dict[str, int] = {}     # host -> HTTP status it refused us with (this run only)
+    provisional: dict | None = None        # a verified but short report, kept while the model keeps working
+    asked_for_more = False
 
     trace.log("run", status="start", topic=cfg["topic"], k=k, model=llm.model, limits=dict(cfg["limits"]),
               memory={"seen_urls": len(memory.seen_urls), "developments": len(memory.developments)})
@@ -194,6 +202,15 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
                       detail="already fetched in an earlier run")
             return {"status": "skipped", "reason": "Already fetched in an earlier run. If it reported a known "
                     "development, cite that development's known source.", "remaining_budget": budget.remaining()}
+        host = (urlsplit(url.strip()).hostname or "").lower()
+        if host in blocked_hosts:
+            # Code decides this, not the model: a site that refused us once will refuse again,
+            # so don't spend budget (or a request) on it.
+            reason = f"not tried: {host} refused an earlier fetch this run (HTTP {blocked_hosts[host]})"
+            record_article(url, canon, "failed", reason=reason)
+            trace.log("tool", step=budget.steps, tool="fetch_article", args=args, status="failed", detail=reason)
+            return {"status": "failed", "reason": reason, "hint": PRIMARY_SOURCE_HINT,
+                    "remaining_budget": budget.remaining()}
         if not budget.can_fetch():
             trace.log("tool", step=budget.steps, tool="fetch_article", args=args, status="budget",
                       detail="fetch budget used up")
@@ -207,22 +224,50 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
                   latency_ms=r.elapsed_ms, http_status=r.http_status, detail=r.reason, chars=len(r.text),
                   possible_injection=injection or None)
         if r.status != "fetched":
-            return {"status": r.status, "reason": r.reason, "remaining_budget": budget.remaining()}
+            out = {"status": r.status, "reason": r.reason, "remaining_budget": budget.remaining()}
+            if r.http_status in BLOCKING_STATUSES and host:
+                blocked_hosts[host] = r.http_status
+                out["hint"] = PRIMARY_SOURCE_HINT
+            return out
         fetched_texts[canon] = r.text
         if r.final_url:
             fetched_texts[canonicalize(r.final_url)] = r.text
         return {"status": "fetched", "url": url, "title": r.title, "truncated": len(r.text) > max_chars,
                 "text": untrusted(r.text[:max_chars], url), "remaining_budget": budget.remaining()}
 
-    def do_finish(args: dict) -> tuple[dict, dict | None]:
-        nonlocal finish_attempts, salvaged_note
+    def do_finish(args: dict, final: bool = False) -> tuple[dict, dict | None]:
+        nonlocal finish_attempts, salvaged_note, provisional, asked_for_more
         finish_attempts += 1
         texts = {**known_texts, **fetched_texts}
         res = validate_report(args, k, texts)
-        trace.log("tool", step=budget.steps, tool="finish", status="accepted" if res.ok else "rejected",
-                  attempt=finish_attempts, problems=res.problems or None,
-                  developments=len(args.get("developments") or []) if isinstance(args, dict) else None)
+        submitted = len(args.get("developments") or []) if isinstance(args, dict) else None
+        if not res.ok:
+            trace.log("tool", step=budget.steps, tool="finish", status="rejected", attempt=finish_attempts,
+                      problems=res.problems, developments=submitted)
         if res.ok:
+            n = len(res.report["developments"])
+            left = budget.remaining()
+            if (n < k and not final and not asked_for_more
+                    and left["model_steps_left"] >= 6 and left["fetches_left"] >= 3):
+                # Verified but short, and there's budget left: keep it, and ask once for more.
+                # The code, not the model, decides when the run is done.
+                asked_for_more, provisional = True, res.report
+                finish_attempts = 0
+                trace.log("tool", step=budget.steps, tool="finish", status="provisional", developments=n,
+                          detail=f"{n} of {k} verified; asking for more while budget remains")
+                return {"accepted": "provisional",
+                        "message": f"These {n} developments are verified and kept. You have budget for more "
+                                   f"(target {k}): search and fetch primary sources for other developments, then "
+                                   f"call finish again with the complete list, including these.",
+                        "remaining_budget": left}, None
+            if provisional and n < len(provisional["developments"]):
+                # Never let a later, shorter list silently throw away developments already verified
+                trace.log("tool", step=budget.steps, tool="finish", status="accepted",
+                          developments=len(provisional["developments"]),
+                          detail=f"new list had {n}; kept the earlier verified list")
+                return {"accepted": True}, provisional
+            trace.log("tool", step=budget.steps, tool="finish", status="accepted", attempt=finish_attempts,
+                      developments=n)
             return {"accepted": True}, res.report
         if finish_attempts >= MAX_FINISH_ATTEMPTS:
             salvaged = salvage_report(args, k, texts)
@@ -246,7 +291,7 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
             return do_search(call.args), None
         if call.name == "fetch_article":
             return do_fetch(call.args), None
-        return do_finish(call.args)
+        return do_finish(call.args, final=allowed == {"finish"})
 
     # ---------- model ----------
 
@@ -324,6 +369,9 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
     except TerminalError as e:
         status, stop_reason = ("partial" if fetched_texts else "failed"), f"{type(e).__name__}: {e}"
         trace.log("run", step=budget.steps, status="terminal_error", detail=str(e))
+
+    if report is None and provisional is not None:
+        report = provisional  # the last verified list beats an evidence-only fallback
 
     if salvaged_note and status == "complete":
         status, stop_reason = "partial", salvaged_note

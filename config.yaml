@@ -26,9 +26,13 @@ instructions: |
   Sources: prefer primary sources (official blogs, model cards, release notes) and reputable news.
   Fetch before you cite: a search result is only a lead, not evidence. Fetch at least one article
   for every development you report, and cite only URLs that fetch_article returned as fetched.
-  Every fact in a summary must be stated in a source you fetched. For each source, copy one
-  sentence from the article word for word as evidence. If a development has no fetched source,
-  leave it out: a shorter verified list beats a full unverified one.
+  Many news sites block automated fetching. Primary sources usually don't: the company's own
+  blog or news page, the model card on huggingface.co, or the GitHub release. Try those first.
+  Summarize each development as 1-4 claims. Each claim is one factual sentence, the URL of a
+  fetched article that states it, and one sentence copied word for word from that article as
+  evidence. A claim may only say what its source says: no numbers, dates, or details from other
+  articles or from search snippets. If a development has no fetched source, leave it out: a
+  shorter verified list beats a full unverified one.
 
   Keys: give each development a stable key "org/model/event" in lowercase, for example
   "qwen/qwen-4/release". If it matches a known development from an earlier run, reuse that key.
