@@ -1,0 +1,35 @@
+# Tracker policy. The agent can only do what this file allows,
+# and nothing it reads on the web can change it: it's loaded once, read-only.
+
+topic: "Open-weight AI model releases"
+k: 5
+
+model:
+  provider: gemini
+  name: gemini-3.5-flash-lite
+  temperature: 0.2
+
+tools: [search_web, fetch_article, finish]
+
+limits:
+  max_steps: 25            # model calls per run
+  max_searches: 8          # search_web calls (1 Tavily credit each)
+  max_fetches: 15          # fetch_article calls
+  max_total_tokens: 300000 # prompt + output + thinking, summed over the run
+  max_wall_seconds: 600
+
+fetch:
+  allowed_schemes: [http, https]
+  allowed_ports: [80, 443]
+  allowed_hosts: ["*"]     # "*" = any public host; or list domains (subdomains included)
+  blocked_hosts: []        # always refused, e.g. ["example.org"]
+  timeout_seconds: 10      # per connect/read
+  total_timeout_seconds: 20
+  max_bytes: 2000000       # stop downloading after 2 MB
+  max_redirects: 5
+  max_chars_to_model: 12000
+
+search:
+  provider: tavily
+  max_results: 8
+  search_depth: basic
