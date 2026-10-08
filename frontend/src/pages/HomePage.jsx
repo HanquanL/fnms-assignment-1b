@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CalendarDays, Mail, Settings, Sparkles, UserRound } from 'lucide-react'
+import { ArrowRight, CalendarDays, Mail, Radar, Settings, Sparkles, UserRound } from 'lucide-react'
 import { useAuth } from '../auth/useAuth.js'
 import { Card } from '../components/ui.jsx'
 
@@ -66,14 +66,29 @@ export default function HomePage() {
       <section>
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wider text-slate-500">Your toolkit</h2>
         <div className="grid gap-4 sm:grid-cols-3">
-          {['Slot 1', 'Slot 2', 'Slot 3'].map((slot) => (
+          <Link
+            to="/tracker"
+            className="group flex h-32 flex-col justify-between rounded-2xl bg-indigo-500/10 p-4 ring-1 ring-indigo-400/20 transition hover:bg-indigo-500/15"
+          >
+            <span className="grid size-9 place-items-center rounded-lg bg-indigo-500/20">
+              <Radar className="size-4 text-indigo-200" />
+            </span>
+            <span>
+              <span className="flex items-center gap-1 font-medium text-slate-100">
+                Model tracker
+                <ArrowRight className="size-4 transition group-hover:translate-x-0.5" />
+              </span>
+              <span className="text-sm text-slate-400">Top open-weight releases, with sources</span>
+            </span>
+          </Link>
+          {['Slot 2', 'Slot 3'].map((slot) => (
             <div
               key={slot}
               className="grid h-32 place-items-center rounded-2xl border border-dashed border-white/10 text-sm text-slate-500"
             >
               <span className="flex items-center gap-2">
                 <Sparkles className="size-4" />
-                Coming in A2
+                Coming soon
               </span>
             </div>
           ))}

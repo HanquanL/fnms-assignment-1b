@@ -12,13 +12,14 @@ function Backdrop() {
   )
 }
 
-function Logo() {
+function Logo({ compact = false }) {
   return (
-    <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight text-slate-100">
+    <Link to="/" aria-label="Home Base" className="flex shrink-0 items-center gap-2 font-semibold tracking-tight text-slate-100">
       <span className="grid size-8 place-items-center rounded-lg bg-indigo-500/15 ring-1 ring-indigo-400/30">
         <Command className="size-4 text-indigo-300" />
       </span>
-      Home Base
+      {/* In the app header the name hides on phones so the nav and Log out fit */}
+      <span className={compact ? 'hidden sm:inline' : ''}>Home Base</span>
     </Link>
   )
 }
@@ -51,11 +52,14 @@ export function AppLayout() {
     <div className="relative isolate min-h-screen">
       <Backdrop />
       <header className="sticky top-0 z-10 border-b border-white/5 bg-slate-950/70 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-5xl items-center gap-4 px-4 sm:gap-6">
-          <Logo />
+        <div className="mx-auto flex h-16 max-w-5xl items-center gap-3 px-4 sm:gap-6">
+          <Logo compact />
           <nav className="flex gap-1">
             <NavLink to="/" end className={linkClass}>
               Home
+            </NavLink>
+            <NavLink to="/tracker" className={linkClass}>
+              Tracker
             </NavLink>
             <NavLink to="/account" className={linkClass}>
               Account

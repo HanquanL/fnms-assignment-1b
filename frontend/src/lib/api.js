@@ -72,3 +72,8 @@ export const usersApi = {
   update: (id, patch) => api(`/api/users/${id}`, { method: 'PATCH', body: patch }),
   remove: (id) => api(`/api/users/${id}`, { method: 'DELETE' }),
 }
+export const trackerApi = {
+  latest: () => api('/api/tracker/runs/latest'),
+  runs: () => api('/api/tracker/runs'),
+  run: (id) => api(`/api/tracker/runs/${encodeURIComponent(id)}`),
+}
