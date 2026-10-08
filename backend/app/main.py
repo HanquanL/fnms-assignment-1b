@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app import models  # noqa: F401  (registers the User table on Base.metadata)
 from app.db import Base, engine
-from app.routers import auth, users
+from app.routers import auth, users, tracker
 
 
 
@@ -42,5 +42,5 @@ def healthz():
     return {"status": "ok"}
 
 app.include_router(auth.router)
-app.include_router(auth.router)
+app.include_router(tracker.router)
 app.include_router(users.router)
