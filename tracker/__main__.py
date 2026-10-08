@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 from tracker.agent import run_agent
@@ -67,7 +68,9 @@ def cmd_run(label: str | None, force: bool) -> int:
         llm, fallback = make_llms(cfg)
         secret("TAVILY_API_KEY")
         backend = make_backend(cfg)
-        state = backend.load_state()
+        t0 = time.monotonic()
+        state = backend.load_state()  # login + GET /api/tracker/state
+        load_ms = int((time.monotonic() - t0) * 1000)
     except TerminalError as e:
         print(f"STOPPED: {e}", file=sys.stderr)
         return 1
@@ -76,7 +79,7 @@ def cmd_run(label: str | None, force: bool) -> int:
 
     trace = Trace(trace_path)
     try:
-        trace.log("memory", status="loaded", seen_urls=len(memory.seen_urls),
+        trace.log("memory", status="loaded", latency_ms=load_ms, requests=2, seen_urls=len(memory.seen_urls),
                   developments=len(memory.developments), last_top_k=[t["key"] for t in memory.last_top_k])
         result = run_agent(cfg, llm, search_web, fetch_article, trace, memory=memory, fallback_llm=fallback)
 
@@ -91,8 +94,10 @@ def cmd_run(label: str | None, force: bool) -> int:
         payload = build_payload(cfg, result, md, changes, dropped, result.model or cfg["model"]["name"])
 
         try:
+            t0 = time.monotonic()
             saved = backend.save_run(payload)
-            trace.log("memory", status="saved", run_id=saved["id"], counts=saved.get("counts"))
+            trace.log("memory", status="saved", latency_ms=int((time.monotonic() - t0) * 1000), requests=1,
+                      run_id=saved["id"], counts=saved.get("counts"))
             saved_line = f"saved:  run {saved['id']}"
         except TerminalError as e:
             # Don't lose a finished run because the backend was down at the end

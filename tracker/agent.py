@@ -300,9 +300,10 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
 
     def model_call(tools: list[ToolSpec]) -> ModelTurn:
         t0 = time.monotonic()
+        paced = [0.0]  # seconds spent waiting on our own pacer, logged apart from model latency
 
         def attempt() -> ModelTurn:
-            pacer.wait()  # stay under requests_per_minute instead of collecting 429s
+            paced[0] += pacer.wait()  # stay under requests_per_minute instead of collecting 429s
             return active["llm"].generate(system, history, tools)
 
         def with_retries() -> ModelTurn:
@@ -327,7 +328,8 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
             raise
         budget.add_model_call(turn.usage)
         trace.log("model", step=budget.steps, model=active["llm"].model, status="ok",
-                  latency_ms=int((time.monotonic() - t0) * 1000), tokens=asdict(turn.usage),
+                  latency_ms=int((time.monotonic() - t0) * 1000), pacer_wait_ms=int(paced[0] * 1000),
+                  tokens=asdict(turn.usage),
                   tool_calls=[{"tool": c.name, "args": c.args} for c in turn.tool_calls] or None,
                   finish_reason=turn.finish_reason, text=turn.text or None)
         history.append(turn)
