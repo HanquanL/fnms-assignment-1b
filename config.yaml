@@ -32,4 +32,11 @@ fetch:
 search:
   provider: tavily
   max_results: 8
-  search_depth: basic
+  search_depth: basic      # 1 credit per search ("advanced" costs 2)
+  topic: news
+  time_range: week         # only results from the last 7 days
+
+retry:                     # transient failures only (timeouts, 5xx, per-minute 429)
+  max_attempts: 4
+  base_delay_seconds: 1    # 1s, 2s, 4s (+ jitter) between attempts
+  max_delay_seconds: 60    # a server asking us to wait longer than this = treat as quota
