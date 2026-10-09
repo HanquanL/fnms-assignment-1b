@@ -195,6 +195,8 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
             return {"error": "url must be a non-empty string"}
         canon = canonicalize(url)
         if canon in fetched_texts:
+            trace.log("tool", step=budget.steps, tool="fetch_article", args=args, status="cached",
+                      detail="already fetched in this run; no request")
             return {"status": "fetched", "note": "already fetched in this run",
                     "text": untrusted(fetched_texts[canon][:max_chars], url)}
         if canon in memory.seen_urls:

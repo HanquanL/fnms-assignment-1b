@@ -2,9 +2,8 @@
 
 The tracker finds the top 5 open-weight AI model releases, ranks and summarizes them with sources, and reports
 what changed since the last run. Numbers below come from `traces/run1.jsonl` and `traces/run2.jsonl`
-unless a development run (`traces/dev/`, not committed) is named.
-
-> **TODO after run2:** fill in the places marked _[run2]_.
+unless a development run (`traces/dev/`, not committed) is named. Run 1: 2026-10-08 19:57 UTC.
+Run 2: 2026-10-09 20:31 UTC, 24.5 hours later.
 
 ## 1. Workflow vs. agent
 
@@ -66,8 +65,21 @@ reader can see the gap; a second model call per claim could judge it, at the cos
 18% in search, 4% in fetches. The model calls started 4.0–4.8 s apart, almost exactly the pacer's
 60/14 = 4.29 s, and run 1 sent 14 requests in its busiest minute, the most the pacer allows. So **the run was
 paced by our own rate limiter** rather than by Gemini, which is also why it hit no 429s. Run 1's trace counts
-the pacer's waits inside each call's `latency_ms`; from run 2 on, the trace logs `pacer_wait_ms` separately,
-and the backend calls get `latency_ms` too. _[run2: pacer wait vs. Gemini time, and the backend load/save times]_
+the pacer's waits inside each call's `latency_ms`, so for run 2 the trace logs `pacer_wait_ms` separately,
+and the backend calls get `latency_ms` too. Run 2 confirms it:
+
+| Run 2 (68.6 s run + backend calls) | Requests | Time |
+|------------------------------------|---------:|-----:|
+| Waiting on our own pacer | — | 28.4 s |
+| Gemini answering | 16 | 26.5 s (0.8–4.2 s per call) |
+| Tavily | 7 | 12.3 s |
+| Article sites | 2 | 1.4 s (3 more were skipped as already read: no request) |
+| A1 backend: login + load state / save run | 2 / 1 | 3.0 s / 3.2 s |
+
+**28 round trips**, and the single largest share of the run is the pacer: we spent more time deliberately
+waiting (to stay under 15 requests/minute) than Gemini spent answering. The backend calls are slow for a
+local server because each one goes on to Neon, whose free tier suspends an idle database and wakes it on the
+first query. Skipping the 3 known articles saved 3 requests and 3 of the 15 fetches in the budget.
 
 **Tokens:** 165,064, of which 161,817 (98%) were input. Each call resends the whole conversation, so the
 prompt grew from 1,118 tokens on call 1 to 18,773 on call 16; output was only 3,247 tokens. Article text is
@@ -95,8 +107,26 @@ becomes one more source on the existing row.
    if it was in the last top K and isn't now. A run that stopped early (partial) drops nothing: it didn't
    look hard enough to say something fell out.
 
-_[run2: the concrete example from run 2 — which articles were skipped, which known development was reported
-from a new URL, what was new and what dropped.]_
+**What run 2 did with run 1's memory** (3 seen URLs, 3 developments, last top 3):
+
+- The model tried to fetch all three of run 1's sources again (`alphaxiv.org/.../introducing-beam`,
+  `mistral.ai/news/mistral-large-4`, `lindy.ai/blog/deepseek-v4-flash`). Each was answered `skipped` without a
+  request, and the model was pointed to the known evidence instead.
+- Mistral Large 4, Reflection Beam, and DeepSeek V4.1 Flash came back under their exact run-1 keys, citing the
+  run-1 sources and evidence, so they are **Still in top K**.
+- EmbeddingGemma 2 (blog.google) and Cloudflare Clef-omni (blog.cloudflare.com) are **New since last run**.
+- **Dropped** is empty, and here that's correct twice over: all three of run 1's developments are still in the
+  list, and run 2 ended `partial` (below), which drops nothing by design.
+- Run 2 didn't happen to meet a new URL for a known development: the model reused run 1's sources rather
+  than finding new coverage of them, so `renamed_keys` is empty in the trace. That path is exercised in
+  `tests/memory_check.py` against the real backend: an article about Qwen 4 at a new URL, keyed
+  `alibaba/qwen4/weights`, is matched to the known `qwen/qwen-4/release`, which ends up with one row and two
+  sources.
+
+Why run 2 is `partial`: its 5 developments all verified, but one claim about EmbeddingGemma 2 quoted a
+sentence that isn't in the article, three times in a row, so the code dropped that claim and kept the rest
+(`finish rejected 3 times; kept 5 developments whose evidence verified`). We count that as partial on purpose:
+the report says something the model wanted to say was cut.
 
 **A case the method gets wrong:** two different events about the same model collapse into one development,
 because identity ignores the event part. If Qwen 4 is released on Monday and its license changes on
@@ -165,14 +195,13 @@ with **400** `INVALID_ARGUMENT` / `API_KEY_INVALID`, not 401, which we found by 
 **One run costs $0.** Both services are on free tiers with no billing enabled, so the spend cap is zero:
 running out returns an error, never a bill. In quota:
 
-| Resource | Run 1 | Run limit (`config.yaml`) | Free tier |
-|----------|------:|---------:|-----------|
-| Gemini requests (`gemini-3.5-flash-lite`) | 16 | 25 | 15 / minute, 500 / day |
-| Gemini tokens | 165,064 (peak 161,254 in one minute) | 500,000 | 250,000 / minute |
-| Tavily credits (basic search) | 7 | 8 | 1,000 / month |
-| Article fetches | 6 | 15 | free (but 3 of 6 sites refused us) |
-
-_[run2: the same columns for run 2]_
+| Resource | Run 1 | Run 2 | Run limit (`config.yaml`) | Free tier |
+|----------|------:|------:|---------:|-----------|
+| Gemini requests (`gemini-3.5-flash-lite`) | 16 | 16 | 25 | 15 / minute, 500 / day |
+| Gemini tokens | 165,064 | 181,553 | 500,000 | 250,000 / minute |
+| … in the busiest minute | 161,254 | 176,673 | — | 250,000 |
+| Tavily credits (basic search) | 7 | 7 | 8 | 1,000 / month |
+| Article fetches (requests) | 6 | 2 (+3 skipped) | 15 | free (3 of run 1's 6 sites refused us) |
 
 **Running daily, which free tier runs out first?** Gemini's daily quota never does: 16 of 500 requests a day,
 reset every night (even a run that uses all 25 model calls is 5%). **Tavily is the first and only one that
@@ -180,8 +209,8 @@ could:** 7 credits a run is 210 a month, 21% of the 1,000 monthly credits, so wi
 runs out either. Without the reset it would run out on **day 143** (142 runs × 7 = 994 credits, and the 143rd
 run needs more than the 6 left), or on day 126 if every run used all 8 searches.
 
-The limit that actually binds is a different one: **Gemini's 250,000 tokens per minute.** Run 1 already used
-161,254 tokens in its busiest minute (65%) after only 16 calls, because every call resends the growing
-conversation. A run that uses all 25 calls would pass the per-minute token limit in its last minute and spend
+The limit that actually binds is a different one: **Gemini's 250,000 tokens per minute.** Run 1 used 161,254
+tokens in its busiest minute (65%) and run 2 used 176,673 (71%), after only 16 calls each, because every call
+resends the growing conversation (run 2's prompt grew from 1,603 to 20,613 tokens). A run that uses all 25 calls would pass the per-minute token limit in its last minute and spend
 it in per-minute 429 retries. Cheaper fixes than a paid tier: send less article text per fetch, or drop old
 article text from the conversation once its evidence is recorded.
