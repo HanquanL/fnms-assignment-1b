@@ -1,0 +1,134 @@
+{
+ "run1": [
+  {
+   "claim_id": "mistral/mistral-large-4/release#1",
+   "verdict": "supported",
+   "text": "Mistral AI released the open weights of its trillion-parameter frontier model Mistral Large 4, nicknamed 'Le Chonk'.",
+   "url": "https://siliconangle.com/2026/10/29/mistral-releases-open-weights-for-mistral-large-4-providing-sovereign-control-for-the-companys-le-chonk-ai-model",
+   "evidence": "Mistral AI SAS today announced the availability of the open weights of its frontier model Mistral Large 4, nicknamed “Le Chonk,”"
+  },
+  {
+   "claim_id": "mistral/mistral-large-4/release#2",
+   "verdict": "supported",
+   "text": "Mistral Large 4 features 1 trillion total parameters with 52 billion active parameters and native multimodality.",
+   "url": "https://siliconangle.com/2026/10/29/mistral-releases-open-weights-for-mistral-large-4-providing-sovereign-control-for-the-companys-le-chonk-ai-model",
+   "evidence": "With 1 trillion parameters and 52 billion active parameters, ML4 is natively multimodal"
+  },
+  {
+   "claim_id": "mistral/mistral-large-4/zdnet-release#1",
+   "verdict": "supported",
+   "text": "Mistral released the weights for its ML4 model as planned.",
+   "url": "https://www.zdnet.com/innovation/mistral-large-4-weights-release",
+   "evidence": "As planned, Mistral has released the weights for its ML4 model."
+  },
+  {
+   "claim_id": "ricursive/ripple-65b/release#1",
+   "verdict": "supported",
+   "text": "Ricursive Intelligence released Ripple-65B Preview on November 4, 2026.",
+   "url": "https://www.orcarouter.ai/blog/ripple-65b-preview-launch-review",
+   "evidence": "Ripple-65B Preview , released by Ricursive Intelligence on 4 November 2026, is two different products depending on how you reach it."
+  },
+  {
+   "claim_id": "ricursive/ripple-65b/release#2",
+   "verdict": "supported",
+   "text": "The model is a dense 65-billion-parameter Transformer released under the Apache 2.0 license with weights available on Hugging Face.",
+   "url": "https://www.orcarouter.ai/blog/ripple-65b-preview-launch-review",
+   "evidence": "The download is 129.6 GB of Apache 2.0 weights whose model card advertises context “up to 1M” tokens."
+  },
+  {
+   "claim_id": "moonshot/kimi-k3-1-pro/release#1",
+   "verdict": "unsupported",
+   "text": "Moonshot AI released the weights for its trillion-parameter sparse flagship model Kimi K3.1 Pro on November 4, 2026.",
+   "url": "https://www.orcarouter.ai/blog/ripple-65b-vs-kimi-k3-1-pro",
+   "evidence": null
+  },
+  {
+   "claim_id": "moonshot/kimi-k3-1-pro/release#2",
+   "verdict": "supported",
+   "text": "The model supports text, image, and video input with a 1,048,576-token context window.",
+   "url": "https://www.orcarouter.ai/blog/ripple-65b-vs-kimi-k3-1-pro",
+   "evidence": "It ships with text, image and video input, configurable reasoning effort and a 1,048,576-token context window."
+  },
+  {
+   "claim_id": "baseten/joey-1/release#1",
+   "verdict": "supported",
+   "text": "Baseten released joey-1, a 2-billion-parameter decision model developed by Base Labs, on October 29, 2026.",
+   "url": "https://www.unite.ai/baseten-releases-joey-1-a-2b-open-weights-decision-model",
+   "evidence": "Baseten on October 29, 2026 released joey-1, a 2B-parameter decision model developed by its in-house research lab Base Labs"
+  },
+  {
+   "claim_id": "baseten/joey-1/release#2",
+   "verdict": "supported",
+   "text": "The model weights are open-sourced under the MIT license and available on Hugging Face.",
+   "url": "https://www.unite.ai/baseten-releases-joey-1-a-2b-open-weights-decision-model",
+   "evidence": "The weights are open under the MIT license."
+  }
+ ],
+ "run2": [
+  {
+   "claim_id": "mistral/mistral-large-4/release#1",
+   "verdict": "supported",
+   "text": "Mistral released the weights for its trillion-parameter open-source model Mistral Large 4 (ML4) for businesses and governments to download and deploy.",
+   "url": "https://techcrunch.com/2026/10/29/mistral-releases-weights-for-its-trillion-parameter-ai-model-targeting-cybersecurity",
+   "evidence": "French AI company Mistral has released the weights for its trillion-parameter open source AI model Mistral Large 4 (ML4), allowing businesses and governments to download and deploy the system themselves."
+  },
+  {
+   "claim_id": "mistral/mistral-large-4/release#2",
+   "verdict": "supported",
+   "text": "The model weights are made available on Hugging Face and via Mistral's API.",
+   "url": "https://techcrunch.com/2026/10/29/mistral-releases-weights-for-its-trillion-parameter-ai-model-targeting-cybersecurity",
+   "evidence": "The weights for ML4 are being made available on Hugging Face and via its API."
+  },
+  {
+   "claim_id": "liquid-ai/lfm3/release#1",
+   "verdict": "supported",
+   "text": "Liquid AI released its LFM3 lineup featuring six open-weight models anchored by a 1.7-billion-parameter base.",
+   "url": "https://www.channelinsider.com/ai/news-liquid-ai-lfm3-edge-ai-channel-partners",
+   "evidence": "The startup released its LFM3 lineup on Oct. 27, rolling out six open-weight models anchored by a 1.7-billion-parameter base."
+  },
+  {
+   "claim_id": "liquid-ai/lfm3/release#2",
+   "verdict": "unsupported",
+   "text": "The suite utilizes a tri-hybrid design incorporating short convolutions, sliding-window attention, and global attention to support text, vision, audio, and decision capabilities.",
+   "url": "https://www.channelinsider.com/ai/news-liquid-ai-lfm3-edge-ai-channel-partners",
+   "evidence": null
+  },
+  {
+   "claim_id": "moonshot-ai/kimi-k3-1-pro/release#1",
+   "verdict": "supported",
+   "text": "Moonshot AI set a deadline of November 4, 2026, to release the full model weights for Kimi K3.1 Pro.",
+   "url": "https://www.neoteo.com/en/kimi-k31-pros-cyber-filtering-what-810-measures",
+   "evidence": "Moonshot said it planned to release the full Kimi K3.1 Pro model weights by November 4, 2026"
+  },
+  {
+   "claim_id": "moonshot-ai/kimi-k3-1-pro/release#2",
+   "verdict": "supported",
+   "text": "Moonshot removed cyber-related data from Kimi K3.1 Pro's mid-training corpus and reinforcement learning mix while retaining general coding tasks for the open-weight release.",
+   "url": "https://www.neoteo.com/en/kimi-k31-pros-cyber-filtering-what-810-measures",
+   "evidence": "Moonshot AI says it removed cyber-related data from Kimi K3.1 Pro’s mid-training corpus and reinforcement-learning environment mix for the open-weight release, while retaining general-purpose coding tasks."
+  }
+ ],
+ "run3": [
+  {
+   "claim_id": "mistral/mistral-large-4/release#1",
+   "verdict": "supported",
+   "text": "Mistral AI released the weights for its trillion-parameter open-source model Mistral Large 4, also known as Le Chonk.",
+   "url": "https://techcrunch.com/2026/10/29/mistral-releases-weights-for-its-trillion-parameter-ai-model-targeting-cybersecurity",
+   "evidence": "French AI company Mistral has released the weights for its trillion-parameter open source AI model Mistral Large 4 (ML4), allowing businesses and governments to download and deploy the system themselves. Nicknamed “Le Chonk,” the model was first introduced earlier this month ."
+  },
+  {
+   "claim_id": "tencent/hy4/release#1",
+   "verdict": "supported",
+   "text": "Tencent announced Tencent Hy4, a large language model that ranks among the leading open-source AI models.",
+   "url": "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models",
+   "evidence": "Tencent today announced the release of Tencent Hy4, its latest-generation large language model, marking a significant leap in performance and capabilities that now ranks it among the world’s leading open-source AI models."
+  },
+  {
+   "claim_id": "liquid-ai/lfm3/release#1",
+   "verdict": "unsupported",
+   "text": "Liquid AI announced LFM3-1.7B as an open-weight model focused on local agents and tool calling.",
+   "url": "https://tech-insider.org/au/how-to-use-hugging-face-2026",
+   "evidence": null
+  }
+ ]
+}

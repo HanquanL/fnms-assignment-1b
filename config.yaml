@@ -110,8 +110,8 @@ verifier:
   max_concurrent: 2
 
 orchestrator:
-  researcher_url: http://localhost:8001    # override with RESEARCHER_URL
-  verifier_url: http://localhost:8002      # override with VERIFIER_URL (the Render URL)
+  researcher_url: http://127.0.0.1:8001    # override with RESEARCHER_URL; 127.0.0.1 not localhost (ORCHESTRATION.md Q2)
+  verifier_url: http://127.0.0.1:8002      # override with VERIFIER_URL (the Render URL)
   connect_timeout_seconds: 15
   slack_seconds: 20              # network + serialization + a worker finishing its last call
   cold_start_seconds:            # added to the response timeout: a sleeping worker wakes up first

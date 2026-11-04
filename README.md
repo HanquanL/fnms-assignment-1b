@@ -1,4 +1,4 @@
-# Home Base — FNMS Assignments 1 & 1B
+# Home Base — FNMS Assignments 1, 1B & 2
 
 A personal "home base" web app (A1: accounts, login, account management) and its first tool (1B): an
 **agentic tracker** that finds the top 5 **open-weight AI model releases**, ranks them, summarizes them with
@@ -7,6 +7,138 @@ sources, and on every later run reports what's new since the last one. Results a
 
 FastAPI + Postgres (Neon) backend, React + Vite frontend, and a hand-written agent loop in Python
 (Gemini for the model, Tavily for search). The design questions are answered in [AGENT.md](AGENT.md).
+
+## Assignment 2: orchestrator + researcher + verifier
+
+The tracker is now a team of three **separate processes that talk only over HTTP**. Design answers:
+[ORCHESTRATION.md](ORCHESTRATION.md). Every conflict with the instructions and every big decision:
+[DECISIONS.md](DECISIONS.md).
+
+| Process | Port | Code | Talks to | Secrets it needs |
+|---|---|---|---|---|
+| **Orchestrator** = the A1 backend | 8000 | `backend/app/orchestrator/` | researcher, verifier, Neon (the **only** process with DB access) | `backend/.env` (DB, JWT) + `RESEARCHER_TOKEN`, `VERIFIER_TOKEN` (+ URLs) |
+| **Researcher** = the A1B tracker loop behind `POST /research` | 8001 | `researcher/`, `tracker/` | Gemini, Tavily, web pages | `RESEARCHER_TOKEN`, `GEMINI_API_KEY`, `TAVILY_API_KEY` |
+| **Verifier**, `POST /verify` | 8002 locally / Render | `verifier/` | Gemini, web pages | `VERIFIER_TOKEN`, `GEMINI_API_KEY` |
+
+`shared/` is the one shared schema file (wire contract) plus stateless helpers; no service imports
+another service's package. The orchestrator is plain code (no LLM).
+
+### Setup (once)
+
+Same venv as before (`backend/.venv`, see Quick start step 1), plus the tracker packages:
+
+```powershell
+backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt -r tracker\requirements.txt
+```
+
+In the git-ignored repository-root `.env` (see `.env.example`), next to the Gemini/Tavily keys, add two
+**different** random tokens:
+
+```powershell
+backend\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+```env
+RESEARCHER_TOKEN=<token 1>
+VERIFIER_TOKEN=<token 2>
+# VERIFIER_URL=https://<your-service>.onrender.com   # once the verifier is on Render
+```
+
+The orchestrator reads its tokens from the environment / root `.env`, never from `backend/.env`
+(which is committed), and never sends them to the browser.
+
+### Start the three processes (three terminals, repository root)
+
+```powershell
+backend\.venv\Scripts\python.exe -m uvicorn researcher.app:app --port 8001
+```
+```powershell
+backend\.venv\Scripts\python.exe -m uvicorn verifier.app:app --port 8002
+```
+```powershell
+cd backend; .venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+```
+
+(macOS/Linux: `backend/.venv/bin/python -m uvicorn ...`.) Each answers `GET /healthz` with
+`{"status":"ok"}` without a token. Then start the frontend as in Quick start step 2.
+
+### Run it
+
+- **From the web page:** Tracker → **Run tracker (researcher + verifier)**. The button shows the stage
+  (researching / verifying / saving) and the report appears when the run is saved (1–2 minutes).
+- **From the command line** (same API the button uses; logs in with `TRACKER_USERNAME`/`TRACKER_PASSWORD`):
+
+```powershell
+cd backend; .venv\Scripts\python.exe run_orchestrated.py
+```
+
+The page shows each claim's label (**supported / unsupported / unreachable / unverified**), the
+verifier's excerpt for supported claims, whether each run was complete or partial and **which worker
+failed**, and — when the researcher failed — last run's top K under a **stale** banner.
+
+### Configuration (`config.yaml`)
+
+| Key | Meaning |
+|---|---|
+| `run_budget` | The ONE budget for a run: `max_steps` (model calls), `max_fetches` (HTTP requests to web pages, every redirect hop counts), `max_tokens` |
+| `allocation.researcher` / `allocation.verifier` | Each worker's share and `time_budget_ms`. Must fit in `run_budget` (checked at startup) |
+| `researcher.max_searches` | Tavily calls per research request |
+| `verifier.*` | Verifier model, prompt window, concurrency |
+| `orchestrator.*` | Worker URLs, connect timeout, slack, cold-start allowance, retry policy, pre-warm |
+| `limits` | Still used by the A1B single-agent CLI (`python -m tracker run`), kept as the baseline for comparison |
+
+### Deploy the verifier on Render (free tier)
+
+The code is on branch `a2-orchestration` of the GitHub repository. In the Render dashboard (needs
+**your** Render account):
+
+1. **New → Blueprint**, pick this repository and branch `a2-orchestration`; Render reads
+   [`render.yaml`](render.yaml) (service `fnms-verifier`, free plan, `uvicorn verifier.app:app`,
+   health check `/healthz`). Or **New → Web Service** with: build `pip install -r verifier/requirements.txt`,
+   start `uvicorn verifier.app:app --host 0.0.0.0 --port $PORT`, env `PYTHON_VERSION=3.11.9`.
+2. In the service's **Environment**, set `VERIFIER_TOKEN` (the same value as in your local `.env`) and
+   `GEMINI_API_KEY`. They live only in Render, never in the repo.
+3. When it is live, check `https://<service>.onrender.com/healthz` → `{"status":"ok"}`.
+4. Put `VERIFIER_URL=https://<service>.onrender.com` in the root `.env` and restart the backend.
+5. Test it (uses ~4 model calls): `backend\.venv\Scripts\python.exe tests\worker_matrix.py verifier --url https://<service>.onrender.com`
+6. **Cold start:** leave it idle for > 15 minutes, run the same command; the first `/healthz` latency
+   in the output (and in `traces/matrix-verifier-*.json`) is the wake-up cost. Then do the graded run
+   and collect all three logs: `backend\.venv\Scripts\python.exe tests\extract_run.py <run_id> a2-run1-render --verifier-url https://<service>.onrender.com`
+   (the verifier's log is downloaded from its token-protected `GET /trace`). Fill in the **TODO (Render)**
+   lines in ORCHESTRATION.md §2.
+
+### Tests
+
+Offline (no keys, no network, no database writes — the orchestrator test uses an in-memory SQLite copy):
+
+```powershell
+backend\.venv\Scripts\python.exe tests\contract_check.py
+backend\.venv\Scripts\python.exe tests\verifier_check.py
+backend\.venv\Scripts\python.exe tests\researcher_check.py
+backend\.venv\Scripts\python.exe tests\orchestrator_check.py
+```
+
+Live, against a running worker (the PDF's p.7 table; a few real model calls):
+
+```powershell
+backend\.venv\Scripts\python.exe tests\worker_matrix.py verifier
+backend\.venv\Scripts\python.exe tests\worker_matrix.py researcher
+```
+
+Traces: each service appends to `traces/<service>.jsonl` (git-ignored); the graded runs are copied to
+`traces/a2-*/` with `tests/extract_run.py`.
+
+### Known limitations
+
+- Idempotency records are in memory: a Render restart forgets them, so a retry after a restart repeats
+  the work (ORCHESTRATION.md Q3).
+- The verifier shows the model only the first 15,000 characters of a page; a claim supported further
+  down is marked unsupported (found in the hand-check, ORCHESTRATION.md Q5).
+- The researcher has no memory in A2 (it can't see earlier runs); the orchestrator maps near-duplicate
+  keys onto known developments instead. A2 runs don't record per-article fetch status
+  (`tracker_articles`), because that isn't part of the wire contract.
+- Run progress (the "stage" the button shows) lives in the backend's memory; restarting the backend
+  mid-run loses that run.
+- Only the verifier is meant for Render; the researcher and orchestrator run locally.
 
 ## Tech stack
 
@@ -233,6 +365,7 @@ Every tracker row belongs to a user, and deleting the user (A1 "delete account")
 | `tracker_developments` | `id` UUID PK, `user_id` FK, `key` (unique per user, e.g. `qwen/qwen-4/release`), `title`, `summary`, `first_seen_run_id`, `last_seen_run_id`, `created_at`, `updated_at` | A real-world development, independent of the articles that reported it |
 | `tracker_sources` | `id` PK, `development_id` FK, `url` (unique per development), `title`, `evidence`, `first_run_id` | The articles supporting a development, with the quoted evidence |
 | `tracker_rankings` | `id` PK, `run_id` FK, `development_id` FK, `rank` (null when dropped), `change` (new / still / dropped), `summary` (as reported in that run) | Each run's top-K snapshot, including what dropped |
+| `tracker_claims` (A2) | `id` PK, `run_id` FK, `user_id` FK, `development_id` FK, `development_key`, `claim_id` (unique per run), `position`, `text`, `source_url`, `verdict` (supported / unsupported / unreachable / unverified), `evidence` (the verifier's excerpt, only when supported), `verifier_request_id` | One row per claim per run, so labels and evidence survive a refresh. New table, created by `create_all`; no existing table was altered. Which worker failed is in `tracker_runs.stats` |
 
 Why this shape: a development and an article are different things (one development, many articles), so
 "a new URL reports a development we already covered" is just one more `tracker_sources` row on an existing
@@ -258,6 +391,8 @@ JSON in, JSON out. Protected routes need `Authorization: Bearer <token>`.
 | GET    | `/api/tracker/runs` | yes | 200 | Run history, newest first, with new / still / dropped and article-status counts |
 | GET    | `/api/tracker/runs/latest` | yes | 200 | The latest non-failed run: rankings with sources, and its articles (404 if none) |
 | GET    | `/api/tracker/runs/:id` | yes | 200 | One run in the same shape |
+| POST   | `/api/tracker/orchestrate` | yes | 202 | A2: start a researcher + verifier run for this user; returns `{run_id, state, stage}` (409 if one is already running) |
+| GET    | `/api/tracker/orchestrate/:run_id` | yes | 200 | A2: progress of a run started above (`running` / `done` / `error`) |
 
 A user is always returned as `{id, username, email, created_at, updated_at}`.
 

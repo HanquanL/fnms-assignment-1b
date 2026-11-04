@@ -1,0 +1,19 @@
+{
+ "seed": 2630,
+ "supported_pool": 15,
+ "selected": [
+  "run1:moonshot/kimi-k3-1-pro/release#1",
+  "run2:liquid-ai/lfm3/release#2",
+  "run3:liquid-ai/lfm3/release#1",
+  "run2:moonshot-ai/kimi-k3-1-pro/release#2",
+  "run1:ricursive/ripple-65b/release#1",
+  "run1:baseten/joey-1/release#1",
+  "run2:moonshot-ai/kimi-k3-1-pro/release#1",
+  "run1:mistral/mistral-large-4/release#1",
+  "run2:liquid-ai/lfm3/release#1",
+  "run2:mistral/mistral-large-4/release#2",
+  "run1:mistral/mistral-large-4/zdnet-release#1",
+  "run2:mistral/mistral-large-4/release#1",
+  "run3:tencent/hy4/release#1"
+ ]
+}
