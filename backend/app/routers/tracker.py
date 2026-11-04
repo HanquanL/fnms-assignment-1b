@@ -8,9 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user
-from app.models import TrackerArticle, TrackerDevelopment, TrackerRanking, TrackerRun, TrackerSource, User
+from app.models import TrackerArticle, TrackerClaim, TrackerDevelopment, TrackerRanking, TrackerRun, TrackerSource, User
 from app.tracker_schemas import (
     ArticleOut,
+    ClaimOut,
+    OrchestrateOut,
+    StaleTopK,
     RankingOut,
     RunCounts,
     RunDetailOut,
@@ -75,24 +78,66 @@ def _summaries(db: Session, runs: list[TrackerRun]) -> list[RunSummaryOut]:
             .group_by(TrackerArticle.run_id, TrackerArticle.status)
         ):
             counts[rid][st] = n
+    claim_counts: dict[uuid.UUID, dict[str, int]] = {rid: {} for rid in ids}
+    if ids:
+        for rid, verdict, n in db.execute(
+            select(TrackerClaim.run_id, TrackerClaim.verdict, func.count())
+            .where(TrackerClaim.run_id.in_(ids))
+            .group_by(TrackerClaim.run_id, TrackerClaim.verdict)
+        ):
+            claim_counts[rid][verdict] = n
+
+    def workers(r: TrackerRun, key: str) -> list[str]:
+        v = (r.stats or {}).get(key)
+        return [w for w in v.split(",") if w] if isinstance(v, str) else []
+
     return [
-        RunSummaryOut.model_validate(r).model_copy(update={"counts": RunCounts(**counts[r.id])})
+        RunSummaryOut.model_validate(r).model_copy(update={
+            "counts": RunCounts(**counts[r.id]),
+            "failed_workers": workers(r, "failed_workers"),
+            "partial_workers": workers(r, "partial_workers"),
+            "claim_counts": claim_counts[r.id],
+        })
         for r in runs
     ]
 
 
-def _detail(db: Session, run: TrackerRun) -> RunDetailOut:
+def _rankings(db: Session, run_id: uuid.UUID) -> list[RankingOut]:
     rows = db.execute(
         select(TrackerRanking, TrackerDevelopment)
         .join(TrackerDevelopment, TrackerRanking.development_id == TrackerDevelopment.id)
-        .where(TrackerRanking.run_id == run.id)
+        .where(TrackerRanking.run_id == run_id)
     ).all()
     sources = _sources_by_dev(db, [dev.id for _, dev in rows])
+    claims: dict[uuid.UUID, list[ClaimOut]] = defaultdict(list)
+    for c in db.scalars(
+        select(TrackerClaim).where(TrackerClaim.run_id == run_id)
+        .order_by(TrackerClaim.development_key, TrackerClaim.position)
+    ):
+        claims[c.development_id].append(ClaimOut.model_validate(c))
     rankings = [
-        RankingOut(rank=r.rank, change=r.change, key=d.key, title=d.title, summary=r.summary, sources=sources[d.id])
+        RankingOut(rank=r.rank, change=r.change, key=d.key, title=d.title, summary=r.summary, sources=sources[d.id],
+                   claims=claims[d.id] if r.rank is not None else [])
         for r, d in rows
     ]
     rankings.sort(key=lambda x: (x.rank is None, x.rank or 0, x.title))  # ranked 1..K, then dropped
+    return rankings
+
+
+def _detail(db: Session, run: TrackerRun) -> RunDetailOut:
+    rankings = _rankings(db, run.id)
+
+    stale = None
+    stale_id = (run.stats or {}).get("stale_from_run_id")
+    if stale_id:
+        try:
+            old = db.scalar(select(TrackerRun).where(TrackerRun.id == uuid.UUID(stale_id),
+                                                     TrackerRun.user_id == run.user_id))
+        except ValueError:
+            old = None
+        if old is not None:
+            stale = StaleTopK(run_id=old.id, finished_at=old.finished_at,
+                              rankings=[r for r in _rankings(db, old.id) if r.rank is not None])
 
     articles = db.scalars(
         select(TrackerArticle)
@@ -106,6 +151,7 @@ def _detail(db: Session, run: TrackerRun) -> RunDetailOut:
         report_md=run.report_md,
         rankings=rankings,
         articles=[ArticleOut.model_validate(a) for a in articles],
+        stale_top_k=stale,
     )
 
 
@@ -224,6 +270,31 @@ def reset_state(current_user: User = Depends(get_current_user), db: Session = De
     db.execute(delete(TrackerRun).where(TrackerRun.user_id == current_user.id))
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------- Assignment 2: orchestrated runs ----------
+
+@router.post("/orchestrate", response_model=OrchestrateOut, status_code=status.HTTP_202_ACCEPTED)
+def start_orchestrated_run(current_user: User = Depends(get_current_user)):
+    """Start a researcher + verifier run for the signed-in user. Returns at once; the run's
+    results land in run history when it finishes. 409 if this user already has a run going."""
+    from app.orchestrator import runner   # imported lazily: the A1 API works without worker settings
+    try:
+        p = runner.start(current_user.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))
+    if p.pop("conflict", False):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A run is already in progress")
+    return p
+
+
+@router.get("/orchestrate/{run_id}", response_model=OrchestrateOut)
+def orchestrated_run_status(run_id: str, current_user: User = Depends(get_current_user)):
+    from app.orchestrator import runner
+    p = runner.status(run_id, current_user.id)
+    if p is None:
+        raise _not_found("No such run in progress")
+    return p
 
 
 # ---------- frontend-facing ----------

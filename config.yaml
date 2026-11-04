@@ -73,3 +73,54 @@ retry:                     # transient failures only (timeouts, 5xx, per-minute 
 
 backend:                   # where the tracker keeps its memory: the A1 API (never the database directly)
   api_url: http://localhost:8000   # override with TRACKER_API_URL
+
+# ---------------------------------------------------------------------------
+# Assignment 2: orchestrator + researcher + verifier (see ORCHESTRATION.md)
+# ---------------------------------------------------------------------------
+# ONE budget for the whole run. The orchestrator splits it between the workers below and
+# refuses to allocate more than this in total. A step is one model call; a fetch is one HTTP
+# request to a web page, every redirect hop included.
+run_budget:
+  max_steps: 40
+  max_fetches: 36
+  max_tokens: 650000
+
+# Each worker's share (sent as the envelope's budget). researcher + verifier must fit in run_budget;
+# the orchestrator checks this at startup.
+allocation:
+  researcher:
+    max_steps: 25
+    max_fetches: 18
+    max_tokens: 500000
+    time_budget_ms: 240000   # A1B runs took ~70 s; 4 min leaves room for pacing + retries
+  verifier:
+    max_steps: 15
+    max_fetches: 18
+    max_tokens: 150000
+    time_budget_ms: 150000   # up to 20 claims; ~1 model call per distinct URL at <= 14/min
+
+researcher:
+  max_searches: 8          # Tavily calls per request (not part of the wire budget; reported in usage.searches)
+
+verifier:
+  model: gemini-3.5-flash-lite
+  max_chars_to_model: 15000
+  max_output_tokens: 2048
+  model_timeout_seconds: 60
+  max_concurrent: 2
+
+orchestrator:
+  researcher_url: http://localhost:8001    # override with RESEARCHER_URL
+  verifier_url: http://localhost:8002      # override with VERIFIER_URL (the Render URL)
+  connect_timeout_seconds: 15
+  slack_seconds: 20              # network + serialization + a worker finishing its last call
+  cold_start_seconds:            # added to the response timeout: a sleeping worker wakes up first
+    researcher: 0                # runs locally
+    verifier: 90                 # Render free tier: "about a minute" to wake (PDF); measured in ORCHESTRATION.md
+  retry:
+    max_attempts: 3
+    base_delay_seconds: 2
+    max_delay_seconds: 30
+    max_retry_after_seconds: 60  # a worker asking us to wait longer than this = give up
+  max_seconds_per_worker: 600    # no new attempt starts after this much time on one worker
+  prewarm_verifier: true         # GET /healthz on the verifier while the researcher works

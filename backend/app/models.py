@@ -123,3 +123,32 @@ class TrackerRanking(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)    # as reported in THIS run
 
     __table_args__ = (UniqueConstraint("run_id", "development_id", name="uq_tracker_rankings_run_dev"),)
+
+class TrackerClaim(Base):
+    """Assignment 2: one claim of one run, with the verifier's verdict. A new table (created by
+    create_all on startup); no existing table is altered.
+
+    verdict: supported | unsupported | unreachable (from the verifier) | unverified (the
+    orchestrator's label when the verifier gave no valid verdict: down, timed out, partial,
+    malformed answer). evidence is the VERIFIER's excerpt, only for supported claims; the
+    researcher's own quotes never cross the wire and are never stored here."""
+    __tablename__ = "tracker_claims"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("tracker_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = _user_fk()
+    development_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("tracker_developments.id", ondelete="CASCADE")
+    )
+    development_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    claim_id: Mapped[str] = mapped_column(String(200), nullable=False)   # as sent to the verifier
+    position: Mapped[int] = mapped_column(Integer, nullable=False)       # order within the development
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)
+    evidence: Mapped[str | None] = mapped_column(Text)
+    verifier_request_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+
+    __table_args__ = (UniqueConstraint("run_id", "claim_id", name="uq_tracker_claims_run_claim"),)

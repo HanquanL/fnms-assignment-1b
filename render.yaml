@@ -1,0 +1,21 @@
+# Render Blueprint for the verifier (Assignment 2). Only the verifier is deployed; the
+# orchestrator (backend) and researcher run locally.
+# Secrets are NOT here: `sync: false` makes Render ask for them in the dashboard.
+services:
+  - type: web
+    name: fnms-verifier
+    runtime: python
+    plan: free
+    buildCommand: pip install -r verifier/requirements.txt
+    startCommand: uvicorn verifier.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: VERIFIER_TRACE_STDOUT
+        value: "1"
+      - key: VERIFIER_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

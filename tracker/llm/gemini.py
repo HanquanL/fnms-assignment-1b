@@ -66,6 +66,7 @@ class GeminiClient:
         self._gen = {"temperature": temperature, "maxOutputTokens": max_output_tokens}
         self._timeout = timeout
         self._transport = transport
+        self.call_timeout: float | None = None  # set per call by the A2 worker to fit its deadline
 
     @staticmethod
     def _contents(history: list[HistoryItem]) -> list[dict]:
@@ -95,12 +96,13 @@ class GeminiClient:
             "generationConfig": self._gen,
         }
         url = f"{BASE_URL}/models/{self.model}:generateContent"
+        timeout = min(self._timeout, self.call_timeout) if self.call_timeout else self._timeout
         try:
-            with httpx.Client(timeout=self._timeout, transport=self._transport) as client:
+            with httpx.Client(timeout=timeout, transport=self._transport) as client:
                 # Key in a header, never in the URL (URLs end up in logs)
                 resp = client.post(url, json=body, headers={"x-goog-api-key": self._key})
         except httpx.TimeoutException as e:
-            raise TransientError(f"Gemini timed out after {self._timeout:g}s") from e
+            raise TransientError(f"Gemini timed out after {timeout:g}s") from e
         except httpx.TransportError as e:
             raise TransientError(f"network error reaching Gemini: {type(e).__name__}") from e
 

@@ -126,11 +126,32 @@ def kickoff(cfg: Mapping, memory: Memory, budget: Budget) -> str:
 def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, trace: Trace, *,
               memory: Memory | None = None, pacer: Pacer | None = None, retry: RetryPolicy | None = None,
               fallback_llm: LLMClient | None = None,
-              sleep: Callable[[float], None] = time.sleep) -> AgentResult:
+              sleep: Callable[[float], None] = time.sleep,
+              budget: Budget | None = None, deadline: float | None = None,
+              hop_fetch: bool = False) -> AgentResult:
+    """A2 worker mode (all optional; the A1B CLI passes none of them):
+      budget     a Budget whose clock started when the HTTP request arrived
+      deadline   monotonic time by which the worker must answer: no model call, search, fetch, or
+                 backoff sleep may start that would run past it (BudgetExceeded -> partial)
+      hop_fetch  fetch(url, on_hop=, deadline=) is called so every redirect hop takes one fetch
+                 from the budget, reserved before the request is sent (PDF: redirects included)"""
     memory = memory or Memory()
     k = int(cfg["k"])
-    budget = Budget.from_config(cfg["limits"])
+    budget = budget or Budget.from_config(cfg["limits"])
+    if deadline is not None:
+        base_sleep = sleep
+
+        def sleep(seconds: float) -> None:  # noqa: F811 -- a sleep that never crosses the deadline
+            if time.monotonic() + seconds > deadline - 2:
+                raise BudgetExceeded("time budget would run out while waiting (pacing/backoff)")
+            base_sleep(seconds)
+
+    def time_left() -> float:
+        return float("inf") if deadline is None else deadline - time.monotonic()
+
     pacer = pacer or Pacer(float(cfg["model"]["requests_per_minute"]), sleep=sleep)
+    if deadline is not None:
+        pacer._sleep = sleep  # a pacer shared across worker requests must not sleep past THIS deadline
     retry = retry or RetryPolicy.from_config(cfg["retry"])
     max_chars = int(cfg["fetch"]["max_chars_to_model"])
     started_at = datetime.now(timezone.utc).isoformat()
@@ -165,6 +186,8 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
         query = args.get("query")
         if not isinstance(query, str):
             return {"error": "query must be a string"}
+        if time_left() < 10:
+            return {"error": "Not enough time left to search. Call finish with what you have."}
         if not budget.can_search():
             trace.log("tool", step=budget.steps, tool="search_web", args=args, status="budget",
                       detail="search budget used up")
@@ -218,14 +241,24 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
             trace.log("tool", step=budget.steps, tool="fetch_article", args=args, status="budget",
                       detail="fetch budget used up")
             return {"error": f"Fetch budget used up ({budget.max_fetches}). Call finish with what you have."}
-        budget.fetches += 1
-        r = fetch(url)
+        if time_left() < 5:
+            return {"error": "Not enough time left to fetch. Call finish with what you have."}
+        if hop_fetch:
+            def on_hop(_url: str) -> bool:
+                if budget.fetches >= budget.max_fetches:
+                    return False
+                budget.fetches += 1
+                return True
+            r = fetch(url, on_hop=on_hop, deadline=deadline)
+        else:
+            budget.fetches += 1
+            r = fetch(url)
         record_article(url, canon, r.status, title=r.title, reason=r.reason, http_status=r.http_status)
         lowered = r.text.lower()
         injection = [h for h in INJECTION_HINTS if h in lowered]
         trace.log("tool", step=budget.steps, tool="fetch_article", args=args, status=r.status,
                   latency_ms=r.elapsed_ms, http_status=r.http_status, detail=r.reason, chars=len(r.text),
-                  possible_injection=injection or None)
+                  possible_injection=injection or None, hops=getattr(r, "hops", None))
         if r.status != "fetched":
             out = {"status": r.status, "reason": r.reason, "remaining_budget": budget.remaining()}
             if r.http_status in BLOCKING_STATUSES and host:
@@ -306,6 +339,12 @@ def run_agent(cfg: Mapping, llm: LLMClient, search: SearchFn, fetch: FetchFn, tr
 
         def attempt() -> ModelTurn:
             paced[0] += pacer.wait()  # stay under requests_per_minute instead of collecting 429s
+            if deadline is not None:
+                left = time_left()
+                if left < 3:
+                    raise BudgetExceeded("time budget: too little time left for another model call")
+                if hasattr(active["llm"], "call_timeout"):
+                    active["llm"].call_timeout = max(1.0, left - 1.5)
             return active["llm"].generate(system, history, tools)
 
         def with_retries() -> ModelTurn:

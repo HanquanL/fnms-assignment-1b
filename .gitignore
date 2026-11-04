@@ -27,3 +27,8 @@ reports/dev/
 traces/dev/
 
 reports/unsaved-*.json
+# Assignment 2: per-service traces from local test runs (the graded runs are copied to traces/a2-run*)
+traces/orchestrator.jsonl
+traces/researcher.jsonl
+traces/verifier.jsonl
+traces/matrix-*.json

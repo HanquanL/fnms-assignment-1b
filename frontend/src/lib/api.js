@@ -76,4 +76,7 @@ export const trackerApi = {
   latest: () => api('/api/tracker/runs/latest'),
   runs: () => api('/api/tracker/runs'),
   run: (id) => api(`/api/tracker/runs/${encodeURIComponent(id)}`),
+  // Assignment 2: start an orchestrated (researcher + verifier) run, then poll it
+  orchestrate: () => api('/api/tracker/orchestrate', { method: 'POST' }),
+  orchestration: (id) => api(`/api/tracker/orchestrate/${encodeURIComponent(id)}`),
 }

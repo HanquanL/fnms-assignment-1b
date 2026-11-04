@@ -86,43 +86,25 @@ class RunIn(BaseModel):
             raise ValueError("rank greater than k")
         return self
 
-class RunIn(BaseModel):
-    started_at: datetime
-    finished_at: datetime
-    status: RunStatus
-    stop_reason: str | None = Field(default=None, max_length=500)
-    topic: str = Field(min_length=1, max_length=200)
-    k: int = Field(ge=3, le=10)
-    model: str = Field(min_length=1, max_length=100)
-    stats: dict[str, int | float | str | None] = Field(default_factory=dict, max_length=50)
-    report_md: str = Field(max_length=200_000)
-    articles: list[ArticleIn] = Field(default_factory=list, max_length=500)
-    developments: list[DevelopmentIn] = Field(default_factory=list, max_length=50)
-    rankings: list[RankingIn] = Field(default_factory=list, max_length=30)
-
-    @model_validator(mode="after")
-    def consistent(self):
-        if self.finished_at < self.started_at:
-            raise ValueError("finished_at is before started_at")
-        dev_keys = [d.key for d in self.developments]
-        if len(dev_keys) != len(set(dev_keys)):
-            raise ValueError("duplicate development keys")
-        rank_keys = [r.key for r in self.rankings]
-        if len(rank_keys) != len(set(rank_keys)):
-            raise ValueError("duplicate keys in rankings")
-        ranks = [r.rank for r in self.rankings if r.rank is not None]
-        if len(ranks) != len(set(ranks)):
-            raise ValueError("duplicate ranks")
-        if any(r > self.k for r in ranks):
-            raise ValueError("rank greater than k")
-        return self
-
 # ---------- Responses (backend -> tracker / frontend) ----------
 
 class SourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     url: str
     title: str | None
+    evidence: str | None
+
+
+Verdict = Literal["supported", "unsupported", "unreachable", "unverified"]
+
+
+class ClaimOut(BaseModel):
+    """A2: one claim and its label. evidence is the verifier's excerpt, only when supported."""
+    model_config = ConfigDict(from_attributes=True)
+    claim_id: str
+    text: str
+    source_url: str
+    verdict: Verdict
     evidence: str | None
 
 
@@ -133,6 +115,7 @@ class RankingOut(BaseModel):
     title: str
     summary: str
     sources: list[SourceOut]
+    claims: list[ClaimOut] = []
 
 
 class ArticleOut(BaseModel):
@@ -168,12 +151,32 @@ class RunSummaryOut(BaseModel):
     model: str
     stats: dict
     counts: RunCounts = RunCounts()
+    # A2: which worker failed / returned partial work (empty for A1B single-agent runs)
+    failed_workers: list[str] = []
+    partial_workers: list[str] = []
+    claim_counts: dict[str, int] = {}
+
+
+class StaleTopK(BaseModel):
+    """A2: when the researcher returned nothing, last run's top K -- shown, but marked stale."""
+    run_id: uuid.UUID
+    finished_at: datetime
+    rankings: list[RankingOut]
 
 
 class RunDetailOut(RunSummaryOut):
     report_md: str
     rankings: list[RankingOut]
     articles: list[ArticleOut]
+    stale_top_k: StaleTopK | None = None
+
+
+class OrchestrateOut(BaseModel):
+    run_id: uuid.UUID
+    state: Literal["running", "done", "error"]
+    stage: str
+    started_at: datetime
+    error: str | None = None
 
 
 class StateDevelopment(BaseModel):

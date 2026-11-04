@@ -31,6 +31,7 @@ class FetchResult:
     reason: str | None = None
     fetched_at: str = ""
     elapsed_ms: int = 0
+    hops: int = 0                # HTTP requests actually sent (the first URL + each redirect followed)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -66,9 +67,15 @@ def _read_capped(resp: httpx.Response, policy: FetchPolicy, deadline: float) -> 
     return bytes(body)
 
 
-def fetch_article(url: str, policy: FetchPolicy) -> FetchResult:
+def fetch_article(url: str, policy: FetchPolicy, *, on_hop=None, deadline: float | None = None) -> FetchResult:
+    """on_hop(url) -> bool is called before EVERY request (first URL and each redirect) and may
+    refuse it; A2's researcher uses it so one redirect hop = one fetch from the budget.
+    deadline (monotonic seconds) caps the whole fetch, including all hops."""
     started = time.monotonic()
+    overall = deadline
     deadline = started + policy.total_timeout_seconds
+    if overall is not None:
+        deadline = min(deadline, overall)
     result = FetchResult(status="failed", url=url, canonical_url=canonicalize(url) if url else url,
                          fetched_at=datetime.now(timezone.utc).isoformat())
 
@@ -78,7 +85,15 @@ def fetch_article(url: str, policy: FetchPolicy) -> FetchResult:
         with httpx.Client(timeout=policy.timeout_seconds, follow_redirects=False, verify=True) as client:
             for _hop in range(policy.max_redirects + 1):
                 target = vet_url(current, policy)          # raises UrlRejected / FetchFailed
-                resp = client.send(_pinned_request(client, target), stream=True)
+                if time.monotonic() >= deadline - 0.5:
+                    raise FetchFailed("no time left for another request")
+                if on_hop is not None and not on_hop(current):
+                    raise FetchFailed("fetch budget used up (every redirect hop counts as a fetch)")
+                result.hops += 1
+                request = _pinned_request(client, target)
+                request.extensions["timeout"] = httpx.Timeout(
+                    min(policy.timeout_seconds, max(0.5, deadline - time.monotonic()))).as_dict()
+                resp = client.send(request, stream=True)
                 try:
                     if resp.is_redirect:
                         location = resp.headers.get("location")
